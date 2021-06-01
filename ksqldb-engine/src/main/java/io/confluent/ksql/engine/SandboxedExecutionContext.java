@@ -46,6 +46,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import org.apache.commons.lang3.NotImplementedException;
 
 /**
  * An execution context that can execute statements without changing the core engine's state
@@ -169,6 +170,15 @@ final class SandboxedExecutionContext implements KsqlExecutionContext {
         serviceContext,
         statement.getSessionConfig()
     ).executeTransientQuery(statement, excludeTombstones);
+  }
+
+  @Override
+  public TransientQueryMetadata createStreamPullQuery(
+      final ServiceContext serviceContext,
+      final ImmutableAnalysis analysis,
+      final ConfiguredStatement<Query> statement,
+      final boolean excludeTombstones) {
+    throw new NotImplementedException("todo");
   }
 
   @Override
