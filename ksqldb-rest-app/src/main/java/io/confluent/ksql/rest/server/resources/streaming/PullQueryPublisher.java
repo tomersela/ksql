@@ -30,6 +30,7 @@ import io.confluent.ksql.engine.PullQueryExecutionUtil;
 import io.confluent.ksql.execution.streams.RoutingFilter.RoutingFilterFactory;
 import io.confluent.ksql.execution.streams.RoutingOptions;
 import io.confluent.ksql.internal.PullQueryExecutorMetrics;
+import io.confluent.ksql.metastore.model.DataSource.DataSourceType;
 import io.confluent.ksql.parser.tree.Query;
 import io.confluent.ksql.physical.pull.HARouting;
 import io.confluent.ksql.physical.pull.PullPhysicalPlan.PullPhysicalPlanType;
@@ -124,12 +125,15 @@ class PullQueryPublisher implements Flow.Publisher<Collection<StreamedRow>> {
           true
       );
 
+      if (pullQueryMetrics.isPresent()) {
+        recordMetrics(pullQueryMetrics.get(), result);
+      }
       final PullQueryResult finalResult = result;
       result.onCompletionOrException((v, throwable) -> {
         decrementer.decrementAtMostOnce();
 
         pullQueryMetrics.ifPresent(m -> {
-          recordMetrics(m, Optional.of(finalResult));
+          recordMetrics(m, finalResult);
         });
       });
 
@@ -141,25 +145,29 @@ class PullQueryPublisher implements Flow.Publisher<Collection<StreamedRow>> {
       decrementer.decrementAtMostOnce();
 
       if (result == null) {
-        pullQueryMetrics.ifPresent(m -> recordMetrics(m, Optional.empty()));
+        pullQueryMetrics.ifPresent(this::recordErrorMetrics);
       }
       throw t;
     }
   }
 
   private void recordMetrics(
-      final PullQueryExecutorMetrics metrics, final Optional<PullQueryResult> result) {
-    final PullSourceType sourceType = result.map(
-        PullQueryResult::getSourceType).orElse(PullSourceType.UNKNOWN);
-    final PullPhysicalPlanType planType = result.map(
-        PullQueryResult::getPlanType).orElse(PullPhysicalPlanType.UNKNOWN);
-    final RoutingNodeType routingNodeType = result.map(
-        PullQueryResult::getRoutingNodeType).orElse(RoutingNodeType.UNKNOWN);
-    metrics.recordLatency(startTimeNanos, sourceType, planType, routingNodeType);
-    metrics.recordRowsReturned(result.map(PullQueryResult::getTotalRowsReturned).orElse(0L),
-        sourceType, planType, routingNodeType);
-    metrics.recordRowsProcessed(result.map(PullQueryResult::getTotalRowsProcessed).orElse(0L),
-        sourceType, planType, routingNodeType);
+      final PullQueryExecutorMetrics metrics, final PullQueryResult result) {
+    final PullSourceType sourceType = result.getSourceType();
+    final PullPhysicalPlanType planType = result.getPlanType();
+    final RoutingNodeType routingNodeType = result.getRoutingNodeType();
+    final DataSourceType dataSourceType = result.getDataSourceType();
+    metrics.recordLatency(startTimeNanos, sourceType, planType, routingNodeType, dataSourceType);
+    metrics.recordRowsReturned(result.getTotalRowsReturned(),
+        sourceType, planType, routingNodeType, dataSourceType);
+    metrics.recordRowsProcessed(result.getTotalRowsProcessed(),
+        sourceType, planType, routingNodeType, dataSourceType);
+  }
+
+  private void recordErrorMetrics(final PullQueryExecutorMetrics metrics) {
+    metrics.recordLatencyForError(startTimeNanos);
+    metrics.recordZeroRowsReturnedForError();
+    metrics.recordZeroRowsProcessedForError();
   }
 
   private static final class PullQuerySubscription

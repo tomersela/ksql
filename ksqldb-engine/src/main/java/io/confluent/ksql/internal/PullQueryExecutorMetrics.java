@@ -16,7 +16,9 @@
 package io.confluent.ksql.internal;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableMap.Builder;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import io.confluent.ksql.metastore.model.DataSource.DataSourceType;
 import io.confluent.ksql.metrics.MetricCollectors;
 import io.confluent.ksql.physical.pull.PullPhysicalPlan.PullPhysicalPlanType;
 import io.confluent.ksql.physical.pull.PullPhysicalPlan.PullSourceType;
@@ -44,6 +46,7 @@ import org.apache.kafka.common.metrics.stats.Percentiles;
 import org.apache.kafka.common.metrics.stats.Percentiles.BucketSizing;
 import org.apache.kafka.common.metrics.stats.Rate;
 import org.apache.kafka.common.utils.Time;
+import org.jetbrains.annotations.NotNull;
 
 @SuppressWarnings("checkstyle:ClassDataAbstractionCoupling")
 public class PullQueryExecutorMetrics implements Closeable {
@@ -127,14 +130,24 @@ public class PullQueryExecutorMetrics implements Closeable {
       final long startTimeNanos,
       final PullSourceType sourceType,
       final PullPhysicalPlanType planType,
-      final RoutingNodeType routingNodeType
+      final RoutingNodeType routingNodeType,
+      final DataSourceType dataSourceType
   ) {
+    final MetricsKey key = new MetricsKey(sourceType, planType, routingNodeType, dataSourceType);
+    innerRecordLatency(startTimeNanos, key);
+  }
+
+  public void recordLatencyForError(final long startTimeNanos) {
+    final MetricsKey key = new MetricsKey();
+    innerRecordLatency(startTimeNanos, key);
+  }
+
+  private void innerRecordLatency(final long startTimeNanos, final MetricsKey key) {
     // Record latency at microsecond scale
     final long nowNanos = time.nanoseconds();
     final double latency = TimeUnit.NANOSECONDS.toMicros(nowNanos - startTimeNanos);
     this.latencySensor.record(latency);
     this.requestRateSensor.record(1);
-    final MetricsKey key = new MetricsKey(sourceType, planType, routingNodeType);
     if (latencySensorMap.containsKey(key)) {
       latencySensorMap.get(key).record(latency);
     } else {
@@ -146,10 +159,21 @@ public class PullQueryExecutorMetrics implements Closeable {
       final double value,
       final PullSourceType sourceType,
       final PullPhysicalPlanType planType,
-      final RoutingNodeType routingNodeType
+      final RoutingNodeType routingNodeType,
+      final DataSourceType dataSourceType
   ) {
     this.errorRateSensor.record(value);
-    final MetricsKey key = new MetricsKey(sourceType, planType, routingNodeType);
+    final MetricsKey key = new MetricsKey(sourceType, planType, routingNodeType, dataSourceType);
+    if (errorRateSensorMap.containsKey(key)) {
+      errorRateSensorMap.get(key).record(value);
+    } else {
+      throw new IllegalStateException("Metrics not configured correctly, missing " + key);
+    }
+  }
+
+  public void recordErrorRateForNoResult(final double value) {
+    this.errorRateSensor.record(value);
+    final MetricsKey key = new MetricsKey();
     if (errorRateSensorMap.containsKey(key)) {
       errorRateSensorMap.get(key).record(value);
     } else {
@@ -165,12 +189,23 @@ public class PullQueryExecutorMetrics implements Closeable {
       final double value,
       final PullSourceType sourceType,
       final PullPhysicalPlanType planType,
-      final RoutingNodeType routingNodeType
+      final RoutingNodeType routingNodeType,
+      final DataSourceType dataSourceType
   ) {
     this.responseSizeSensor.record(value);
-    final MetricsKey key = new MetricsKey(sourceType, planType, routingNodeType);
+    final MetricsKey key = new MetricsKey(sourceType, planType, routingNodeType, dataSourceType);
     if (responseSizeSensorMap.containsKey(key)) {
       responseSizeSensorMap.get(key).record(value);
+    } else {
+      throw new IllegalStateException("Metrics not configured correctly, missing " + key);
+    }
+  }
+
+  public void recordResponseSizeForError(final long responseBytes) {
+    this.responseSizeSensor.record(responseBytes);
+    final MetricsKey key = new MetricsKey();
+    if (responseSizeSensorMap.containsKey(key)) {
+      responseSizeSensorMap.get(key).record(responseBytes);
     } else {
       throw new IllegalStateException("Metrics not configured correctly, missing " + key);
     }
@@ -192,11 +227,21 @@ public class PullQueryExecutorMetrics implements Closeable {
       final double value,
       final PullSourceType sourceType,
       final PullPhysicalPlanType planType,
-      final RoutingNodeType routingNodeType
+      final RoutingNodeType routingNodeType,
+      final DataSourceType dataSourceType
   ) {
-    final MetricsKey key = new MetricsKey(sourceType, planType, routingNodeType);
+    final MetricsKey key = new MetricsKey(sourceType, planType, routingNodeType, dataSourceType);
     if (rowsReturnedSensorMap.containsKey(key)) {
       rowsReturnedSensorMap.get(key).record(value);
+    } else {
+      throw new IllegalStateException("Metrics not configured correctly, missing " + key);
+    }
+  }
+
+  public void recordZeroRowsReturnedForError() {
+    final MetricsKey key = new MetricsKey();
+    if (rowsReturnedSensorMap.containsKey(key)) {
+      rowsReturnedSensorMap.get(key).record(0);
     } else {
       throw new IllegalStateException("Metrics not configured correctly, missing " + key);
     }
@@ -206,11 +251,21 @@ public class PullQueryExecutorMetrics implements Closeable {
       final double value,
       final PullSourceType sourceType,
       final PullPhysicalPlanType planType,
-      final RoutingNodeType routingNodeType
+      final RoutingNodeType routingNodeType,
+      final DataSourceType dataSourceType
   ) {
-    final MetricsKey key = new MetricsKey(sourceType, planType, routingNodeType);
+    final MetricsKey key = new MetricsKey(sourceType, planType, routingNodeType, dataSourceType);
     if (rowsProcessedSensorMap.containsKey(key)) {
       rowsProcessedSensorMap.get(key).record(value);
+    } else {
+      throw new IllegalStateException("Metrics not configured correctly, missing " + key);
+    }
+  }
+
+  public void recordZeroRowsProcessedForError() {
+    final MetricsKey key = new MetricsKey();
+    if (rowsProcessedSensorMap.containsKey(key)) {
+      rowsProcessedSensorMap.get(key).record(0);
     } else {
       throw new IllegalStateException("Metrics not configured correctly, missing " + key);
     }
@@ -289,7 +344,7 @@ public class PullQueryExecutorMetrics implements Closeable {
         legacyCustomMetricsTags,
         new Rate()
     );
-    
+
     // new metrics with ksql service in tags
     addSensor(
         sensor,
@@ -335,7 +390,7 @@ public class PullQueryExecutorMetrics implements Closeable {
         customMetricsTags,
         new Rate()
     );
-    
+
     sensors.add(sensor);
     return sensor;
   }
@@ -600,12 +655,12 @@ public class PullQueryExecutorMetrics implements Closeable {
   }
 
   private void addSensor(
-          final Sensor sensor,
-          final String metricName,
-          final String groupName,
-          final String description,
-          final Map<String, String> metricsTags,
-          final MeasurableStat measureableStat
+      final Sensor sensor,
+      final String metricName,
+      final String groupName,
+      final String description,
+      final Map<String, String> metricsTags,
+      final MeasurableStat measureableStat
   ) {
     sensor.add(
         metrics.metricName(
@@ -620,38 +675,57 @@ public class PullQueryExecutorMetrics implements Closeable {
 
   private Map<MetricsKey, Sensor> configureSensorMap(
       final String sensorBaseName, final MetricsAdder metricsAdder) {
-    final ImmutableMap.Builder<MetricsKey, Sensor> builder
-        = ImmutableMap.builder();
+    final ImmutableMap.Builder<MetricsKey, Sensor> builder = ImmutableMap.builder();
 
     for (final PullSourceType sourceType : PullSourceType.values()) {
       for (final PullPhysicalPlanType planType : PullPhysicalPlanType.values()) {
         for (final RoutingNodeType routingNodeType : RoutingNodeType.values()) {
-          final String variantName = sourceType.name().toLowerCase() + "-"
-              + planType.name().toLowerCase() + "-" + routingNodeType.name().toLowerCase();
-          final Sensor sensor = metrics.sensor(
-              PULL_QUERY_METRIC_GROUP + "-" + PULL_REQUESTS + "-" + sensorBaseName + "-"
-                  + variantName);
-
-          final ImmutableMap<String, String> tags = ImmutableMap.<String, String>builder()
-              .putAll(customMetricsTags)
-              .put(KsqlConstants.KSQL_QUERY_SOURCE_TAG, sourceType.name().toLowerCase())
-              .put(KsqlConstants.KSQL_QUERY_PLAN_TYPE_TAG, planType.name().toLowerCase())
-              .put(KsqlConstants.KSQL_QUERY_ROUTING_TYPE_TAG,
-                  routingNodeType.name().toLowerCase())
-              .build();
-
-          metricsAdder.addMetrics(sensor, tags, variantName);
-
-          builder.put(new MetricsKey(sourceType, planType, routingNodeType), sensor);
-          sensors.add(sensor);
+          for (final DataSourceType dataSourceType : DataSourceType.values()) {
+            addSensor(
+                sensorBaseName,
+                metricsAdder,
+                builder,
+                new MetricsKey(sourceType, planType, routingNodeType, dataSourceType)
+            );
+          }
         }
       }
     }
 
+    // Add one more sensor for collecting metrics when there is no response
+    addSensor(sensorBaseName, metricsAdder, builder, new MetricsKey());
+
     return builder.build();
   }
 
+  private void addSensor(final String sensorBaseName, final MetricsAdder metricsAdder,
+      final Builder<MetricsKey, Sensor> builder, final MetricsKey metricsKey) {
+    final String variantName = metricsKey.variantName();
+    final Sensor sensor = metrics.sensor(
+        PULL_QUERY_METRIC_GROUP + "-"
+            + PULL_REQUESTS + "-"
+            + sensorBaseName + "-"
+            + variantName);
+
+    final ImmutableMap<String, String> tags = ImmutableMap.<String, String>builder()
+        .putAll(customMetricsTags)
+        .put(KsqlConstants.KSQL_QUERY_SOURCE_TAG, metricsKey.sourceTypeName())
+        .put(KsqlConstants.KSQL_QUERY_PLAN_TYPE_TAG, metricsKey.planTypeName())
+        .put(KsqlConstants.KSQL_QUERY_ROUTING_TYPE_TAG, metricsKey.routingNodeTypeName())
+        .put(KsqlConstants.KSQL_DATA_SOURCE_TYPE_TAG, metricsKey.dataSourceTypeName())
+        .build();
+
+    metricsAdder.addMetrics(sensor, tags, variantName);
+
+    builder.put(
+        metricsKey,
+        sensor
+    );
+    sensors.add(sensor);
+  }
+
   private interface MetricsAdder {
+
     void addMetrics(Sensor sensor, Map<String, String> tags, String variantName);
   }
 
@@ -661,15 +735,29 @@ public class PullQueryExecutorMetrics implements Closeable {
     private final PullSourceType sourceType;
     private final PullPhysicalPlanType planType;
     private final RoutingNodeType routingNodeType;
+    private final DataSourceType dataSourceType;
+
+    /**
+     * Constructor representing an "unknown key" for situations in which we record metrics for an
+     * API call that didn't have a result (because it had an error instead)
+     */
+    MetricsKey() {
+      this.sourceType = null;
+      this.planType = null;
+      this.routingNodeType = null;
+      this.dataSourceType = null;
+    }
 
     MetricsKey(
         final PullSourceType sourceType,
         final PullPhysicalPlanType planType,
-        final RoutingNodeType routingNodeType
+        final RoutingNodeType routingNodeType,
+        final DataSourceType dataSourceType
     ) {
       this.sourceType = sourceType;
       this.planType = planType;
       this.routingNodeType = routingNodeType;
+      this.dataSourceType = dataSourceType;
     }
 
     @Override
@@ -680,24 +768,60 @@ public class PullQueryExecutorMetrics implements Closeable {
       if (o == null || getClass() != o.getClass()) {
         return false;
       }
-      final MetricsKey key = (MetricsKey) o;
-      return Objects.equals(sourceType, key.sourceType)
-          && Objects.equals(planType, key.planType)
-          && Objects.equals(routingNodeType, key.routingNodeType);
+      final MetricsKey that = (MetricsKey) o;
+      return sourceType == that.sourceType && planType == that.planType
+          && routingNodeType == that.routingNodeType && dataSourceType == that.dataSourceType;
     }
 
     @Override
     public int hashCode() {
-      return Objects.hash(sourceType, planType, routingNodeType);
+      return Objects.hash(sourceType, planType, routingNodeType, dataSourceType);
     }
 
     @Override
     public String toString() {
-      return "MetricsKey{"
-          + "sourceType=" + sourceType
-          + ", planType=" + planType
-          + ", routingNodeType=" + routingNodeType
-          + '}';
+      return "MetricsKey{" +
+          "sourceType=" + sourceType +
+          ", planType=" + planType +
+          ", routingNodeType=" + routingNodeType +
+          ", dataSourceType=" + dataSourceType +
+          '}';
+    }
+
+    public String variantName() {
+      return sourceTypeName() + "-"
+          + planTypeName() + "-"
+          + routingNodeTypeName() + "-"
+          + dataSourceTypeName();
+    }
+
+    @NotNull
+    public String sourceTypeName() {
+      return getName(sourceType);
+    }
+
+    @NotNull
+    public String planTypeName() {
+      return getName(planType);
+    }
+
+    @NotNull
+    public String routingNodeTypeName() {
+      return getName(routingNodeType);
+    }
+
+    @NotNull
+    public String dataSourceTypeName() {
+      return getName(dataSourceType);
+    }
+
+    @NotNull
+    private String getName(final Enum<?> o) {
+      if (o == null) {
+        return "unknown";
+      } else {
+        return o.name().toLowerCase();
+      }
     }
   }
 }

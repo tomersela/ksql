@@ -31,6 +31,7 @@ import io.confluent.ksql.execution.streams.RoutingFilter.RoutingFilterFactory;
 import io.confluent.ksql.execution.streams.RoutingOptions;
 import io.confluent.ksql.internal.PullQueryExecutorMetrics;
 import io.confluent.ksql.metastore.model.DataSource;
+import io.confluent.ksql.metastore.model.DataSource.DataSourceType;
 import io.confluent.ksql.name.ColumnName;
 import io.confluent.ksql.parser.KsqlParser.ParsedStatement;
 import io.confluent.ksql.parser.KsqlParser.PreparedStatement;
@@ -269,7 +270,12 @@ public class QueryEndpoint {
             public void start() {
               super.start();
               // after starting Streams, poll until the query is complete.
-              ksqlEngine.waitForStreamPullQuery(serviceContext, analysis, statement, transientQueryMetadata);
+              ksqlEngine.waitForStreamPullQuery(
+                  serviceContext,
+                  analysis,
+                  statement,
+                  transientQueryMetadata
+              );
               publisher.close();
             }
           },
@@ -298,20 +304,50 @@ public class QueryEndpoint {
         metrics.recordStatusCode(statusCode);
         metrics.recordRequestSize(requestBytes);
         final PullQueryResult r = resultForMetrics.get();
-        final PullSourceType sourceType = Optional.ofNullable(r).map(
-            PullQueryResult::getSourceType).orElse(PullSourceType.UNKNOWN);
-        final PullPhysicalPlanType planType = Optional.ofNullable(r).map(
-            PullQueryResult::getPlanType).orElse(PullPhysicalPlanType.UNKNOWN);
-        final RoutingNodeType routingNodeType = Optional.ofNullable(r).map(
-            PullQueryResult::getRoutingNodeType).orElse(RoutingNodeType.UNKNOWN);
-        metrics.recordResponseSize(responseBytes, sourceType, planType, routingNodeType);
-        metrics.recordLatency(startTimeNanos, sourceType, planType, routingNodeType);
-        metrics.recordRowsReturned(
-            Optional.ofNullable(r).map(PullQueryResult::getTotalRowsReturned).orElse(0L),
-            sourceType, planType, routingNodeType);
-        metrics.recordRowsProcessed(
-            Optional.ofNullable(r).map(PullQueryResult::getTotalRowsProcessed).orElse(0L),
-            sourceType, planType, routingNodeType);
+        if (r == null) {
+          metrics.recordResponseSizeForError(responseBytes);
+          metrics.recordLatencyForError(startTimeNanos);
+          metrics.recordZeroRowsReturnedForError();
+          metrics.recordZeroRowsProcessedForError();
+        } else {
+          // hard coded because this is the table pull query publisher
+          final DataSourceType dataSourceType = DataSourceType.KTABLE;
+
+          final PullSourceType sourceType = r.getSourceType();
+          final PullPhysicalPlanType planType = r.getPlanType();
+          final RoutingNodeType routingNodeType = r.getRoutingNodeType();
+
+          metrics.recordResponseSize(
+              responseBytes,
+              sourceType,
+              planType,
+              routingNodeType,
+              dataSourceType
+          );
+          metrics.recordLatency(
+              startTimeNanos,
+              sourceType,
+              planType,
+              routingNodeType,
+              dataSourceType
+          );
+          metrics.recordRowsReturned(
+              Optional.ofNullable(r).map(PullQueryResult::getTotalRowsReturned).orElse(0L),
+              sourceType,
+              planType,
+              routingNodeType,
+              dataSourceType
+          );
+          metrics.recordRowsProcessed(
+              Optional.ofNullable(r).map(PullQueryResult::getTotalRowsProcessed).orElse(0L),
+              sourceType,
+              planType,
+              routingNodeType,
+              dataSourceType
+          );
+        }
+
+
         pullBandRateLimiter.add(responseBytes);
       });
     });
@@ -473,8 +509,13 @@ public class QueryEndpoint {
         result.onException(future::completeExceptionally);
         result.onCompletion(future::complete);
       } catch (Exception e) {
-        pullQueryMetrics.ifPresent(metrics -> metrics.recordErrorRate(1, result.getSourceType(),
-            result.getPlanType(), result.getRoutingNodeType()));
+        pullQueryMetrics.ifPresent(metrics -> metrics.recordErrorRate(
+            1,
+            result.getSourceType(),
+            result.getPlanType(),
+            result.getRoutingNodeType(),
+            result.getDataSourceType()
+        ));
       }
     }
 

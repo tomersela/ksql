@@ -179,9 +179,10 @@ final class EngineExecutor {
       throw new IllegalArgumentException("Executor can only handle pull queries");
     }
     final SessionConfig sessionConfig = statement.getSessionConfig();
-    PullSourceType sourceType = null;
-    PullPhysicalPlanType planType = null;
-    RoutingNodeType routingNodeType = null;
+    final RoutingNodeType routingNodeType = routingOptions.getIsSkipForwardRequest()
+        ? RoutingNodeType.REMOTE_NODE : RoutingNodeType.SOURCE_NODE;
+
+    PullPhysicalPlan plan = null;
 
     try {
       // Do not set sessionConfig.getConfig to true! The copying is inefficient and slows down pull
@@ -190,16 +191,16 @@ final class EngineExecutor {
       final KsqlConfig ksqlConfig = sessionConfig.getConfig(false);
       final LogicalPlanNode logicalPlan = buildAndValidateLogicalPlan(
           statement, analysis, ksqlConfig, queryPlannerOptions, false);
-      final PullPhysicalPlan physicalPlan = buildPullPhysicalPlan(
+
+      plan = buildPullPhysicalPlan(
           logicalPlan,
           analysis
       );
-      sourceType = physicalPlan.getSourceType();
-      planType = physicalPlan.getPlanType();
+      final PullPhysicalPlan physicalPlan = plan;
+
       // If we ever change how many hops a request can do, we'll need to update this for correct
       // metrics.
-      routingNodeType = routingOptions.getIsSkipForwardRequest()
-          ? RoutingNodeType.REMOTE_NODE : RoutingNodeType.SOURCE_NODE;
+
       final PullQueryQueue pullQueryQueue = new PullQueryQueue();
       final PullQueryQueuePopulator populator = () -> routing.handlePullQuery(
           serviceContext,
@@ -207,19 +208,24 @@ final class EngineExecutor {
           physicalPlan.getQueryId(), pullQueryQueue);
       final PullQueryResult result = new PullQueryResult(physicalPlan.getOutputSchema(), populator,
           physicalPlan.getQueryId(), pullQueryQueue, pullQueryMetrics, physicalPlan.getSourceType(),
-          physicalPlan.getPlanType(), routingNodeType, physicalPlan::getRowsReadFromDataSource);
+          physicalPlan.getPlanType(), routingNodeType, DataSourceType.KTABLE,
+          physicalPlan::getRowsReadFromDataSource);
       if (startImmediately) {
         result.start();
       }
       return result;
     } catch (final Exception e) {
-      final PullSourceType finalSourceType = sourceType;
-      final PullPhysicalPlanType finalPlanType = planType;
-      final RoutingNodeType finalRoutingNodeType = routingNodeType;
-      pullQueryMetrics.ifPresent(metrics -> metrics.recordErrorRate(1,
-          Optional.ofNullable(finalSourceType).orElse(PullSourceType.UNKNOWN),
-          Optional.ofNullable(finalPlanType).orElse(PullPhysicalPlanType.UNKNOWN),
-          Optional.ofNullable(finalRoutingNodeType).orElse(RoutingNodeType.UNKNOWN)));
+      if (plan == null) {
+        pullQueryMetrics.ifPresent(m -> m.recordErrorRateForNoResult(1));
+      } else {
+        final PullPhysicalPlan physicalPlan = plan;
+        pullQueryMetrics.ifPresent(metrics -> metrics.recordErrorRate(1,
+            physicalPlan.getSourceType(),
+            physicalPlan.getPlanType(),
+            routingNodeType,
+            DataSourceType.KTABLE
+        ));
+      }
 
       final String stmtLower = statement.getStatementText().toLowerCase(Locale.ROOT);
       final String messageLower = e.getMessage().toLowerCase(Locale.ROOT);

@@ -16,6 +16,7 @@
 package io.confluent.ksql.engine;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import io.confluent.ksql.KsqlExecutionContext;
 import io.confluent.ksql.analyzer.ImmutableAnalysis;
 import io.confluent.ksql.execution.streams.RoutingOptions;
@@ -47,6 +48,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.apache.commons.lang3.NotImplementedException;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.streams.StreamsConfig;
 
 /**
  * An execution context that can execute statements without changing the core engine's state
@@ -176,9 +179,21 @@ final class SandboxedExecutionContext implements KsqlExecutionContext {
   public TransientQueryMetadata createStreamPullQuery(
       final ServiceContext serviceContext,
       final ImmutableAnalysis analysis,
-      final ConfiguredStatement<Query> statement,
+      final ConfiguredStatement<Query> statementOrig,
       final boolean excludeTombstones) {
-    throw new NotImplementedException("todo");
+    // stream pull query overrides: start from earliest, use one  thread,
+    // and use a tight commit interval for responsiveness.
+    final ConfiguredStatement<Query> statement = statementOrig.withConfigOverrides(
+        ImmutableMap.<String, Object>builder()
+            .putAll(statementOrig.getSessionConfig().getOverrides())
+            .put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
+            .put(StreamsConfig.NUM_STREAM_THREADS_CONFIG, 1)
+            .put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 100)
+            .build()
+    );
+    return EngineExecutor
+        .create(engineContext, serviceContext, statement.getSessionConfig())
+        .executeTransientQuery(statement, excludeTombstones);
   }
 
   @Override
