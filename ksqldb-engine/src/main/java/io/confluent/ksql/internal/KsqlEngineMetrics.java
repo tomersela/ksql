@@ -140,7 +140,7 @@ public class KsqlEngineMetrics implements Closeable {
   public void updateMetrics() {
     recordMessagesConsumed(MetricCollectors.currentConsumptionRate());
     recordTotalMessagesConsumed(MetricCollectors.totalMessageConsumption());
-    recordTotalBytesConsumedAndPerSecond(MetricCollectors.totalBytesConsumption());
+    recordTotalBytesConsumedAndSum(MetricCollectors.totalBytesConsumption());
     recordMessagesProduced(MetricCollectors.currentProductionRate());
     recordMessageConsumptionByQueryStats(MetricCollectors.currentConsumptionRateByQuery());
     recordErrorRate(MetricCollectors.currentErrorRate());
@@ -177,7 +177,7 @@ public class KsqlEngineMetrics implements Closeable {
     this.messagesIn.record(value);
   }
 
-  private void recordTotalBytesConsumedAndPerSecond(final double value) {
+  private void recordTotalBytesConsumedAndSum(final double value) {
     this.totalBytesIn.record(value);
     this.totalBytesInSum.record(value - lastRecordedTotalBytesValue);
     this.lastRecordedTotalBytesValue = value;
